@@ -8,6 +8,7 @@ docbook2markdown
 """
 
 import argparse
+import re
 from xml.dom import minidom
 
 # parse args
@@ -32,6 +33,34 @@ args = parser.parse_args()
 doc = minidom.parse( args.input )
 root = doc.documentElement
 titleLevel = 1
+indentLevel = 0
+
+
+def getIndentTab( i = 0 ):
+    """
+    get \\t indent
+    """
+
+    text = []
+    while i < indentLevel:
+        text.append( '\t' )
+        i += 1
+    return ''.join( text )
+
+
+def getBlankLine( count = 1 ):
+    """
+    get blank line
+    """
+
+    indent = getIndentTab()
+    i = 0
+    text = []
+    while i < count:
+        text.append( '\n' + indent )
+        i += 1
+    return ''.join( text )
+
 
 def n_GetsByTag( node, tag ):
     """
@@ -80,10 +109,87 @@ def n_FirstChild( node ):
     return child
 
 
+def n_CDataChild( node ):
+    """
+    get first cdata element
+    @param node: target node
+    """
+
+    child = node.firstChild;
+    while child != None:
+        if child.nodeType == 4:
+            return child
+        child = child.nextSibling
+
+    return None
+
+
 def getTitleContent( elem ):
     """
     get title content
     @param elem: title element
+    """
+
+    return elem.firstChild.nodeValue
+
+
+
+def walk( start ):
+    """
+    walk and process element
+    @param start: element which is the first
+    """
+
+    text = []
+    blankRe = re.compile( '^[\\t\\n ]*$' )
+
+    while True:
+        if start == None:
+            break;
+
+        if start.nodeType == 3:
+            if not blankRe.search( start.nodeValue ):
+                text.append( start.nodeValue )
+        elif start.nodeType == 1:
+            text.append( {
+                'chapter': lambda n: processChapter( n ),
+                'section': lambda n: processSection( n ),
+                'para': lambda n: processPara( n ),
+                'title': lambda n: processTitle( n ),
+                'table': lambda n: processTable( n ),
+                'important': lambda n: processImportant( n ),
+                'caution': lambda n: processCaution( n ),
+                'warning': lambda n: processWarning( n ),
+                'tip': lambda n: processTip( n ),
+                'ulink': lambda n: processUlink( n ),
+                'citetitle': lambda n: processCitetitle( n ),
+                'example': lambda n: processExample( n ),
+                'appendix': lambda n: processAppendix( n ),
+                'biblioentry': lambda n: processBiblioentry( n ),
+                'programlisting': lambda n: processProgramlisting( n ),
+                'orderedlist': lambda n: processOrderedlist( n )
+            }[ start.tagName ]( start ) )
+
+        start = start.nextSibling
+
+    return ''.join( text )
+
+
+def processUlink( elem ):
+    """
+    process ulink element.
+    @param elem: ulink element
+    """
+    
+    url = elem.getAttributeNode( 'url' ).nodeValue
+    text = walk( n_FirstChild( elem ) )
+    return '[' + text + '](' + url + ')'
+
+
+def processCitetitle( elem ):
+    """
+    get citetitle content
+    @param elem: citetitle element
     """
 
     return elem.firstChild.nodeValue
@@ -97,41 +203,50 @@ def processTitle( elem ):
 
     i = 0
     prefix = ''
+    indent = getIndentTab()
     while i < titleLevel:
         i += 1
         prefix += '#'
 
-    return '\n\n' + prefix + ' ' + getTitleContent( elem ) + '\n\n'
+    return getBlankLine( 1 ) + indent + prefix + ' ' + getTitleContent( elem ) + getBlankLine( 2 )
 
 
-def walk( start ):
+def processOrderedlist( elem ):
     """
-    walk and process element
-    @param start: element which is the first
+    process orderedlist
+    @param elem: orderedlist element
     """
 
+    global indentLevel
     text = []
+    indentLevel += 1
+    items = n_GetsByTag( elem, 'listitem' )
+    index = 1
+    for item in items:
+        text.append( processListitem( item, str( index ) + '. ' ) )
+        index += 1
 
-    while True:
-        if start == None:
-            break;
+    indentLevel -= 1
+    return ''.join( text ) + getBlankLine()
 
-        text.append( {
-            'chapter': lambda n: processChapter( n ),
-            'section': lambda n: processSection( n ),
-            'para': lambda n: processPara( n ),
-            'title': lambda n: processTitle( n ),
-            'table': lambda n: processTable( n ),
-            'important': lambda n: processImportant( n ),
-            'example': lambda n: processExample( n ),
-            'appendix': lambda n: processAppendix( n ),
-            'programlisting': lambda n: processProgramlisting( n )
-        }[ start.tagName ]( start ) )
 
-        start = n_NextElem( start )
+def processListitem( elem, prefix ):
+    """
+    process listitem
+    @param elem: listitem element
+    @param prefix: item prefix 
+    """
 
-    return ''.join( text )
+    pre = '\n' + getIndentTab( 1 ) + prefix
+    if len( elem.childNodes ) == 1:
+        first = elem.firstChild
 
+        if first.nodeType == 3:
+            return pre + first.nodeValue
+        elif first.tagName == 'para':
+            return pre + first.firstChild.nodeValue
+
+    return  pre + walk( n_FirstChild( elem ) )
 
 
 def processImportant( elem ):
@@ -140,7 +255,39 @@ def processImportant( elem ):
     @param elem: important element
     """
 
-    return '**' + elem.firstChild.nodeValue + '**'
+    bl = getBlankLine()
+    return '\n[info]:' + bl + walk( elem.firstChild ) + '\n~~~~' + bl
+
+
+def processCaution( elem ):
+    """
+    process caution
+    @param elem: caution element
+    """
+
+    bl = getBlankLine()
+    return '\n[info]:' + bl + walk( elem.firstChild ) + '\n~~~~' + bl
+
+
+
+def processTip( elem ):
+    """
+    process tip
+    @param elem: tip element
+    """
+
+    bl = getBlankLine()
+    return '\n[note]:' + bl + walk( elem.firstChild ) + '\n~~~~' + bl
+
+
+def processWarning( elem ):
+    """
+    process warning
+    @param elem: warning element
+    """
+
+    bl = getBlankLine()
+    return '\n[alert]:' + bl + walk( elem.firstChild ) + '\n~~~~' + bl
 
 
 def processExample( elem ):
@@ -161,8 +308,13 @@ def processProgramlisting( elem ):
     process programlisting
     @param elem: programlisting element
     """
+    
+    node = n_CDataChild( elem )
+    indent = getIndentTab()
+    if node == None:
+        node = elem.firstChild
 
-    return '\t' + elem.firstChild.nodeValue.replace( '\n', '\t\n' )
+    return indent + '\t' + node.nodeValue.replace( '\n', '\n\t' + indent ) + getBlankLine( 2 )
 
 
 def getEntryContent( elem ):
@@ -171,7 +323,7 @@ def getEntryContent( elem ):
     @param elem: entry element
     """
 
-    return elem.firstChild.nodeValue
+    return elem.firstChild.nodeValue.replace( "|", "&brvbar;" )
 
 
 def processThead( elem ):
@@ -184,7 +336,7 @@ def processThead( elem ):
     text = []
     for entry in entrys:
         text.append( getEntryContent( entry ) )
-    return '|* ' + ' *|* '.join( text ) + ' *|\n'
+    return '|* ' + ' *|* '.join( text ) + ' *|' + getBlankLine()
 
 
 def processTbody( elem ):
@@ -212,10 +364,13 @@ def processTable( elem ):
     """
 
     text = []
+    global titleLevel
+    titleLevel += 1
     text.append( processTitle( n_GetByTag( elem, 'title' ) ) )
     text.append( processThead( n_GetByTag( elem, 'thead' ) ) )
     text.append( processTbody( n_GetByTag( elem, 'tbody' ) ) )
-    return ''.join( text ) + '\n'
+    titleLevel -= 1
+    return ''.join( text ) + getBlankLine( 2 )
 
 
 def processPara( elem ):
@@ -224,7 +379,8 @@ def processPara( elem ):
     @param elem: para element
     """
 
-    return '\n' + elem.firstChild.nodeValue + '\n'
+
+    return walk( elem.firstChild ) + getBlankLine( 2 )
 
 
 def processChapter( elem ):
@@ -237,7 +393,7 @@ def processChapter( elem ):
     titleLevel += 1
     text = walk( n_FirstChild( elem ) )
     titleLevel -= 1
-    return text
+    return text + getBlankLine( 2 )
 
 
 def processSection( elem ):
@@ -250,7 +406,7 @@ def processSection( elem ):
     titleLevel += 1
     text = walk( n_FirstChild( elem ) )
     titleLevel -= 1
-    return text
+    return text + getBlankLine( 2 )
 
 
 def processAppendix( elem ):
@@ -259,8 +415,20 @@ def processAppendix( elem ):
     @param elem: appendix element
     """
 
-    return ''
+    global titleLevel
+    titleLevel += 1
+    text = walk( n_FirstChild( elem ) )
+    titleLevel -= 1
+    return text
 
+
+def processBiblioentry( elem ):
+    """
+    process biblioentry
+    @param elem: biblioentry element
+    """
+
+    return '+ ' + getTitleContent( n_GetByTag( elem, 'title' ) ) + getBlankLine()
 
 
 def processBookinfo( elem ):
@@ -272,9 +440,7 @@ def processBookinfo( elem ):
     text = []
     text.append( "% " + getTitleContent( n_GetByTag( elem, 'title' ) ) )
     text.append( "% " + processAuthors( elem ) )
-    text.append( '' )
-    text.append( '' )
-    return '\n'.join( text )
+    return '\n'.join( text ) + getBlankLine( 2 )
 
 
 def processAuthors( elem ):
@@ -300,7 +466,8 @@ def processBook( elem ):
     text = []
     text.append( processBookinfo( info ) )
     text.append( walk( n_NextElem( info ) ) )
-    print '\n'.join( text )
+    text.append( '' )
+    return '\n'.join( text )
 
 
 def processArticle( node ):
@@ -311,10 +478,14 @@ def processArticle( node ):
 
     pass
 
-{
+result = {
     'book'   : lambda n: processBook( n ),
     'article': lambda n: processArticle( n )
 }[ root.tagName ]( root )
+f = open( args.output, 'w' )
+f.write( result.encode( 'utf-8' ) )
+f.close()
+
 
 
 
