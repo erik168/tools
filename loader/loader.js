@@ -10,9 +10,34 @@ var define;
 var require;
 
 (function () {
+    /**
+     * 模块容器
+     * 
+     * @inner
+     * @type {Object}
+     */
     var modulesCache = {};
+
+    /**
+     * 模块添加事件监听器
+     * 
+     * @inner
+     * @type {Array}
+     */
     var modulesAdder = [];
+    
+    /**
+     * 模块管理
+     * 
+     * @inner
+     */
     var modules = {
+        /**
+         * 添加模块
+         * 
+         * @param {string} id 模块标识
+         * @param {Object} module 模块
+         */
         add: function ( id, module ) {
             modulesCache[ id ] = module;
             var arg = {
@@ -20,23 +45,46 @@ var require;
                 module : module
             };
 
+            // fire add event
             for ( var i = 0, len = modulesAdder.length; i < len; i++ ) {
                 modulesAdder[ i ]( arg );
             }
         },
 
+        /**
+         * 判断模块是否存在
+         * 
+         * @param {string} id 模块标识
+         * @return {boolean}
+         */
         exists: function ( id ) {
             return id in modulesCache;
         },
 
+        /**
+         * 获取模块
+         * 
+         * @param {string} id 模块标识
+         * @return {Object}
+         */
         get: function ( id ) {
             return modulesCache[ id ];
         },
 
+        /**
+         * 添加“模块添加”事件监听器
+         * 
+         * @param {function(Object)} listener 监听器
+         */
         addAddListener: function ( listener ) {
             modulesAdder.push( listener );
         },
 
+        /**
+         * 移除“模块添加”事件监听器
+         * 
+         * @param {function(Object)} listener 监听器
+         */
         removeAddListener: function ( listener ) {
             var len = modulesAdder.length;
             while ( len-- ) {
@@ -47,9 +95,15 @@ var require;
         }
     };
 
-    
-
+    /**
+     * 定义模块
+     * 
+     * @param {string=} id 模块标识
+     * @param {Array=} dependencies 依赖模块列表
+     * @param {Function=} factory 创建模块的工厂方法
+     */
     function define() {
+        // TODO: support CJS module spec
         var id;
         var dependencies;
         var factory;
@@ -82,6 +136,7 @@ var require;
             };
         }
 
+        // process dependencies
         if ( dependencies ) {
             require( dependencies, initModule );
         }
@@ -89,6 +144,11 @@ var require;
             initModule();
         }
 
+        /**
+         * 初始化模块，在所有依赖加载后初始化
+         * 
+         * @inner
+         */
         function initModule() {
             var depends = dependencies || [];
             var len  = depends.length;
@@ -103,6 +163,13 @@ var require;
         }
     }
 
+    /**
+     * 获取模块
+     * 
+     * @param {string|Array} moduleId 模块名称或模块名称列表
+     * @param {Function=} callback 获取模块完成时的回调函数
+     * @return {Object} 如果模块没ready需要下载，则返回null
+     */
     function require( moduleId, callback ) {
         var ids;
         if ( typeof moduleId == 'string' ) {
@@ -111,7 +178,11 @@ var require;
         else if ( moduleId instanceof Array ) {
             ids = moduleId.slice( 0 );
         }
-        
+
+        if ( !ids ) {
+            return null;
+        }
+
         var idLen = ids.length;
         var moduleLoaded = new Array( idLen );
         for ( var i = 0; i < idLen; i++ ) {
@@ -126,8 +197,17 @@ var require;
             }
         }
 
-        return modules.get( ids[ 0 ] );
+        finishRequire();
+        return modules.get( ids[ 0 ] ) || null;
 
+        /**
+         * 获取模块添加完成的事件监听器
+         * 
+         * @inner
+         * @param {string} id 模块标识
+         * @param {number} index 模块在依赖数组中的索引
+         * @return {Function}
+         */
         function getModuleAddListener( id, index ) {
             var listener = function ( arg ) { 
                 if ( arg.id != id ) {
@@ -147,6 +227,12 @@ var require;
             return listener;
         }
 
+        /**
+         * 完成require，调用callback
+         * 在模块与其依赖模块都加载完时调用
+         * 
+         * @inner
+         */
         function finishRequire() {
             var allModuleReady = 1;
             for ( var i = 0; i < idLen; i++ ) {
@@ -164,21 +250,23 @@ var require;
         }
     }
 
-    var CONF = { 
-        baseURL: '/' 
-    };
-
-    require.config = function ( conf ) {
-        for ( var key in conf ) {
-            CONF[ key ] = conf[ key ];
-        }
-    };
-
     window.define = define;
     window.require = require;
 
-
+    /**
+     * 正在加载的模块列表
+     * 
+     * @inner
+     * @type {Object}
+     */
     var loadingModules = {};
+
+    /**
+     * 加载模块
+     * 
+     * @inner
+     * @param {string} moduleId 模块标识
+     */
     function loadModule( moduleId ) {
         if ( modules.exists( moduleId ) 
              || loadingModules[ moduleId ]
@@ -191,9 +279,9 @@ var require;
         script.src = getURL( moduleId );
         script.onload = script.onreadystatechange = function () {
             var readyState = script.readyState;
-            if ('undefined' == typeof readyState
-                || readyState == "loaded"
-                || readyState == "complete"
+            if ( typeof readyState == 'undefined'
+                 || readyState == "loaded"
+                 || readyState == "complete"
             ) {
                 delete loadingModules[ moduleId ];
                 script.onload = script.onreadystatechange = null;
@@ -203,7 +291,12 @@ var require;
         appendScript( script );
     }
 
-
+    /**
+     * 向页面中插入script标签
+     * 
+     * @inner
+     * @param {HTMLScriptElement} script script标签
+     */
     function appendScript( script ) {
         var doc = document;
         var firstScript = doc.getElementsByTagName( 'script' )[ 0 ];
@@ -217,6 +310,16 @@ var require;
         }
     }
 
+    // TODO: comform require spec[ https://github.com/amdjs/amdjs-api/wiki/require ]
+    var CONF = { 
+        baseURL: '/' 
+    };
+
+    require.config = function ( conf ) {
+        for ( var key in conf ) {
+            CONF[ key ] = conf[ key ];
+        }
+    };
     function getURL( id ) {
         return CONF.baseURL + id + '.js';
     }
