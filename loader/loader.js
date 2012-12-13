@@ -1,8 +1,53 @@
+/**
+ * @file js loader run in browser
+ *       module define conforming amd spec
+ * @author errorrik(errorrik@gmail.com)
+ */
+
+
+
 var define;
 var require;
 
 (function () {
-    var modules = {};
+    var modulesCache = {};
+    var modulesAdder = [];
+    var modules = {
+        add: function ( id, module ) {
+            modulesCache[ id ] = module;
+            var arg = {
+                id     : id,
+                module : module
+            };
+
+            for ( var i = 0, len = modulesAdder.length; i < len; i++ ) {
+                modulesAdder[ i ]( arg );
+            }
+        },
+
+        exists: function ( id ) {
+            return id in modulesCache;
+        },
+
+        get: function ( id ) {
+            return modulesCache[ id ];
+        },
+
+        addAddListener: function ( listener ) {
+            modulesAdder.push( listener );
+        },
+
+        removeAddListener: function ( listener ) {
+            var len = modulesAdder.length;
+            while ( len-- ) {
+                if ( modulesAdder[ len ] == listener ) {
+                    modulesAdder.splice( len, 1 );
+                }
+            }
+        }
+    };
+
+    
 
     function define() {
         var id;
@@ -31,49 +76,92 @@ var require;
             }
         }
 
-        if ( modules[ id ] ) {
+        if ( modules.exists( id ) ) {
             throw {
                 message: id + ' is exist!'
             };
         }
 
-        var module = factory();
-        modules[ id ] = module;
-    }
-
-    function require( id, callback ) {
-        var module = modules[ id ];
-
-        if ( typeof callback != 'function' ) {
-            callback = new Function();
-        }
-
-        if ( module ) {
-            callback( module );
-            return module;
+        if ( dependencies ) {
+            require( dependencies, initModule );
         }
         else {
-            var script = document.createElement( 'script' );
-            script.src = getURL( id );
-            
-            script.onload = script.onreadystatechange = function () {
+            initModule();
+        }
 
-                var readyState = script.readyState;
-                if ('undefined' == typeof readyState
-                    || readyState == "loaded"
-                    || readyState == "complete"
-                ) {
-                    try {
-                        callback( modules[ id ] );
-                    } 
-                    finally {
-                        script.onload = script.onreadystatechange = null;
-                    }
-                }
+        function initModule() {
+            var depends = dependencies || [];
+            var len  = depends.length;
+            var args = [];
+
+            while ( len-- ) {
+                args[ len ] = modules.get( depends[ len ] );
+            }
+
+            var module = factory.apply( this, args );
+            modules.add( id, module );
+        }
+    }
+
+    function require( moduleId, callback ) {
+        var ids;
+        if ( typeof moduleId == 'string' ) {
+            ids = [ moduleId ];
+        }
+        else if ( moduleId instanceof Array ) {
+            ids = moduleId.slice( 0 );
+        }
+        
+        var idLen = ids.length;
+        var moduleLoaded = new Array( idLen );
+        for ( var i = 0; i < idLen; i++ ) {
+            var id = ids[ i ];
+            if ( modules.exists( id ) ) {
+                moduleLoaded[ i ] = 1;
+            }
+            else {
+                moduleLoaded[ i ] = 0;
+                modules.addAddListener( getModuleAddListener( id, i ) );
+                loadModule( id );
             }
         }
 
-        appendScript( script );
+        return modules.get( ids[ 0 ] );
+
+        function getModuleAddListener( id, index ) {
+            var listener = function ( arg ) { 
+                if ( arg.id != id ) {
+                    return;
+                }
+
+                moduleLoaded[ index ] = 1;
+                finishRequire();
+                setTimeout( 
+                    function () {
+                        modules.removeAddListener( listener );
+                    },
+                    1
+                );
+            };
+
+            return listener;
+        }
+
+        function finishRequire() {
+            var allModuleReady = 1;
+            for ( var i = 0; i < idLen; i++ ) {
+                allModuleReady = allModuleReady && moduleLoaded[ i ];
+            }
+
+            if ( allModuleReady && typeof callback == 'function' ) {
+                var callbackArgs = [];
+                for ( var i = 0; i < idLen; i++ ) {
+                    callbackArgs.push( modules.get( ids[ i ] ) );
+                }
+
+                callback.apply( this, callbackArgs );
+            }
+        }
     }
 
     var CONF = { 
@@ -88,6 +176,32 @@ var require;
 
     window.define = define;
     window.require = require;
+
+
+    var loadingModules = {};
+    function loadModule( moduleId ) {
+        if ( modules.exists( moduleId ) 
+             || loadingModules[ moduleId ]
+        ) {
+            return;
+        }
+        
+        loadingModules[ moduleId ] = 1;
+        var script = document.createElement( 'script' );
+        script.src = getURL( moduleId );
+        script.onload = script.onreadystatechange = function () {
+            var readyState = script.readyState;
+            if ('undefined' == typeof readyState
+                || readyState == "loaded"
+                || readyState == "complete"
+            ) {
+                delete loadingModules[ moduleId ];
+                script.onload = script.onreadystatechange = null;
+            }
+        }
+
+        appendScript( script );
+    }
 
 
     function appendScript( script ) {
