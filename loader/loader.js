@@ -42,7 +42,7 @@ var require;
             modulesCache[ id ] = module;
             var arg = {
                 id     : id,
-                module : module
+                module : module.exports
             };
 
             // fire add event
@@ -68,7 +68,7 @@ var require;
          * @return {Object}
          */
         get: function ( id ) {
-            return modulesCache[ id ];
+            return modulesCache[ id ] && modulesCache[ id ].exports;
         },
 
         /**
@@ -103,7 +103,6 @@ var require;
      * @param {Function=} factory 创建模块的工厂方法
      */
     function define() {
-        // TODO: support CJS module spec
         var id;
         var dependencies;
         var factory;
@@ -137,8 +136,39 @@ var require;
         }
 
         // process dependencies
+        var module = { id: id, exports: {} };
+        var INTERNAL_MODULE = {
+            require: require,
+            exports: module.exports,
+            module: module
+        };
+
+        // init depends
+        var depends = [];
         if ( dependencies ) {
-            require( dependencies, initModule );
+            depends.push.apply( depends, dependencies );  
+        }
+
+        // find require where in factory body
+        var matches;
+        var factoryBody = factory ? factory.toString() : '';
+        var requireRule = /require\(\s*(['"'])([^'"]+)\1\s*\)/g
+        while ( ( matches = requireRule.exec( factoryBody ) ) ) {
+            depends.push( matches[ 2 ] );
+            console.log( matches )
+        }
+
+        // exclude internal module
+        var len = depends.length;
+        while ( len-- ) {
+            if ( depends[ len ] in INTERNAL_MODULE ) {
+                depends.splice( len, 1 );
+            }
+        }
+
+        // process dependencies
+        if ( depends.length ) {
+            require( depends, initModule );
         }
         else {
             initModule();
@@ -155,10 +185,16 @@ var require;
             var args = [];
 
             while ( len-- ) {
-                args[ len ] = modules.get( depends[ len ] );
+                var dependName = depends[ len ];
+                args[ len ] = dependName in INTERNAL_MODULE
+                    ? INTERNAL_MODULE[ dependName ]
+                    : modules.get( depends[ len ] );
             }
 
-            var module = factory.apply( this, args );
+            var exports = factory.apply( this, args );
+            if ( typeof exports != 'undefined' ) {
+                module.exports = exports;
+            }
             modules.add( id, module );
         }
     }
