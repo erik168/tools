@@ -4,6 +4,8 @@
  * @author errorrik(errorrik@gmail.com)
  */
 
+// TODO: support require relative module path
+// TODO: support object 4 define
 
 
 var define;
@@ -11,12 +13,20 @@ var require;
 
 (function () {
     /**
-     * 模块容器
+     * 已定义模块容器
      * 
      * @inner
      * @type {Object}
      */
-    var modulesCache = {};
+    var definedModule = {};
+
+    /**
+     * 定义中模块容器
+     * 
+     * @inner
+     * @type {Object}
+     */
+    var definingModule = {};
 
     /**
      * 模块添加事件监听器
@@ -39,7 +49,8 @@ var require;
          * @param {Object} module 模块
          */
         add: function ( id, module ) {
-            modulesCache[ id ] = module;
+            definedModule[ id ] = module;
+            delete definingModule[ id ];
             var arg = {
                 id     : id,
                 module : module.exports
@@ -52,13 +63,23 @@ var require;
         },
 
         /**
+         * 添加定义中模块
+         * 
+         * @param {string} id 模块标识
+         * @param {Object} module 模块
+         */
+        addDefining: function ( id, module ) {
+            definingModule[ id ] = module;
+        },
+
+        /**
          * 判断模块是否存在
          * 
          * @param {string} id 模块标识
          * @return {boolean}
          */
         exists: function ( id ) {
-            return id in modulesCache;
+            return id in definedModule;
         },
 
         /**
@@ -68,7 +89,17 @@ var require;
          * @return {Object}
          */
         get: function ( id ) {
-            return modulesCache[ id ] && modulesCache[ id ].exports;
+            return definedModule[ id ] && definedModule[ id ].exports;
+        },
+
+        /**
+         * 获取定义中模块
+         * 
+         * @param {string} id 模块标识
+         * @return {Object}
+         */
+        getDefining: function ( id ) {
+            return definingModule[ id ] && definingModule[ id ];
         },
 
         /**
@@ -142,6 +173,7 @@ var require;
             exports: module.exports,
             module: module
         };
+        modules.addDefining( id, module );
 
         // init depends
         var depends = [];
@@ -155,18 +187,39 @@ var require;
         var requireRule = /require\(\s*(['"'])([^'"]+)\1\s*\)/g
         while ( ( matches = requireRule.exec( factoryBody ) ) ) {
             depends.push( matches[ 2 ] );
-            console.log( matches )
         }
 
-        // exclude internal module
+        // exclude internal module & circle dependency
         var len = depends.length;
         while ( len-- ) {
-            if ( depends[ len ] in INTERNAL_MODULE ) {
+            var dependName = depends[ len ];
+            if ( dependName in INTERNAL_MODULE
+                 || isInDependencyChain( id, dependName )
+            ) {
                 depends.splice( len, 1 );
             }
         }
 
+        function isInDependencyChain( source, target ) {
+            var module = modules.getDefining( target ) || modules.get( target );
+            var depends = module && module.dependencies;
+
+            if ( depends ) {
+                var len = depends.length;
+
+                while ( len-- ) {
+                    var dependName = depends[ len ];
+                    if ( source == dependName
+                         || isInDependencyChain( source, dependName ) ) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         // process dependencies
+        module.dependencies = depends;
         if ( depends.length ) {
             require( depends, initModule );
         }
