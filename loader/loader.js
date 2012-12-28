@@ -5,7 +5,6 @@
  */
 
 // TODO: support require relative module path
-// TODO: support object 4 define
 
 
 var define;
@@ -152,9 +151,12 @@ var require;
                 case 'function':
                     factory = arg;
                     break;
-                default:
-                    if ( arg instanceof Array ) {
+                case 'object':
+                    if ( !dependencies && arg instanceof Array ) {
                         dependencies = arg;
+                    }
+                    else {
+                        factory = arg;
                     }
                     break;
             }
@@ -244,7 +246,10 @@ var require;
                     : modules.get( depends[ len ] );
             }
 
-            var exports = factory.apply( this, args );
+            var exports = typeof factory == 'function'
+                ? factory.apply( this, args )
+                : factory;
+
             if ( typeof exports != 'undefined' ) {
                 module.exports = exports;
             }
